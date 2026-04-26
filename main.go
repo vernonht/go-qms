@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"qms/internal/api"
 	"qms/internal/controller"
 	"qms/internal/order"
 )
@@ -19,7 +21,32 @@ func main() {
 		runDemo(os.Stdout)
 		return
 	}
+	if len(args) > 0 && args[0] == "--server" {
+		addr := ":8080"
+		if len(args) > 1 {
+			addr = args[1]
+		}
+		runServer(addr)
+		return
+	}
 	runInteractive(os.Stdin, os.Stdout)
+}
+
+func runServer(addr string) {
+	dur := processDuration()
+	c := controller.New(
+		controller.WithProcessDuration(dur),
+		controller.WithLogger(controller.NewWriterLogger(os.Stdout)),
+	)
+	fmt.Printf("QMS HTTP server listening on %s\n", addr)
+	fmt.Printf("  POST   /orders   {\"type\":\"normal\"|\"vip\"}\n")
+	fmt.Printf("  POST   /bots\n")
+	fmt.Printf("  DELETE /bots\n")
+	fmt.Printf("  GET    /state\n")
+	if err := http.ListenAndServe(addr, api.New(c)); err != nil {
+		fmt.Fprintf(os.Stderr, "server error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // runDemo executes a scripted simulation that exercises every requirement and
