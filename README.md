@@ -2,13 +2,15 @@
 
 ## Architecture
 
-Three packages with no external dependencies:
+External dependencies: `github.com/gorilla/websocket`
+
+## Architecture
 
 | Package | Responsibility |
 |---|---|
 | `internal/order` | `Order` struct, `Type` (Normal/VIP), `Status` enum |
 | `internal/queue` | Thread-safe priority queue — VIP → FIFO, Normal → FIFO, `EnqueueFront` for bot interruptions |
-| `internal/controller` | Orchestrates bots, queue, and completed list; exposes `NewOrder`, `AddBot`, `RemoveBot`, `State` |
+| `internal/controller` | Orchestrates bots, queue, and completed list; exposes `NewOrder`, `AddBot`, `RemoveBot`, `State`, `Subscribe`/`Unsubscribe` |
 
 ## Key Design Decisions
 
@@ -16,6 +18,7 @@ Three packages with no external dependencies:
 - `stopCh` is a closed channel so any pending `select` fires immediately on bot removal
 - `EnqueueFront` puts a returned order at the head of its priority group (VIP → pos 0, Normal → after last VIP) so priority is maintained after a bot interruption
 - Order and bot IDs use `sync/atomic` for lock-free increment; everything else is mutex-guarded
+- `Subscribe`/`Unsubscribe` expose a fan-out notification channel so observers (e.g. WebSocket handlers) are signalled on every state change without polling
 
 ## Tests — 27 total, all with `-race`
 
@@ -41,6 +44,50 @@ Set `PROCESS_SECONDS=10` (or unset) for the real 10-second-per-order behaviour. 
 
 - `./qms --demo` — scripted simulation demonstrating all requirements, output written to `result.txt`
 - `./qms` — interactive mode
+- `./qms --server [addr]` — HTTP API server (default addr: `:8080`)
+
+### HTTP API
+
+Start the server:
+```
+./qms --server :8080
+```
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| `POST` | `/orders` | `{"type":"normal"\|"vip"}` | Created order object |
+| `POST` | `/bots` | — | `{"bot_count": N}` |
+| `DELETE` | `/bots` | — | `{"bot_count": N}` |
+| `GET` | `/state` | — | JSON snapshot (HTTP) **or** live push stream (WebSocket) |
+
+#### WebSocket stream
+
+Upgrade `GET /state` to a WebSocket connection to receive a pushed JSON message on every state change (order created, bot assigned, order completed, bot added/removed). The server sends an initial snapshot immediately on connect, then a new message each time the system mutates.
+
+```
+# plain HTTP snapshot
+curl http://localhost:8080/state
+
+# WebSocket stream (requires websocat or similar)
+websocat ws://localhost:8080/state
+```
+
+The pushed message format is identical to the HTTP JSON snapshot:
+```json
+{
+  "pending":   [...],
+  "bots":      [...],
+  "completed": [...]
+}
+```
+
+Example HTTP usage:
+```
+curl -X POST http://localhost:8080/bots
+curl -X POST http://localhost:8080/orders -d '{"type":"vip"}'
+curl http://localhost:8080/state
+curl -X DELETE http://localhost:8080/bots
+```
 
 ### Interactive Commands
 
@@ -48,8 +95,8 @@ Set `PROCESS_SECONDS=10` (or unset) for the real 10-second-per-order behaviour. 
 |---|---|---|
 | `new normal` | `n`, `normal` | Add a Normal order |
 | `new vip` | `v`, `vip` | Add a VIP order (jumps ahead of all Normal orders) |
-| `+bot` | `add bot` | Create a new cooking bot |
-| `-bot` | `remove bot` | Destroy the newest bot (order returns to PENDING) |
+| `+bot` | `+` `add bot` | Create a new cooking bot |
+| `-bot` | `-` `remove bot` | Destroy the newest bot (order returns to PENDING) |
 | `status` | `s` | Show current PENDING / BOTS / COMPLETE state |
 | `quit` | `q`, `exit` | Exit |
 

@@ -48,6 +48,8 @@ type Controller struct {
 	workCh          chan struct{}
 	processDuration time.Duration
 	logger          Logger
+	subMu           sync.Mutex
+	subs            map[chan struct{}]struct{}
 }
 
 type bot struct {
@@ -79,6 +81,7 @@ func New(opts ...Option) *Controller {
 		workCh:          make(chan struct{}, 1000), // buffered to avoid blocking on signals
 		processDuration: defaultProcessDuration,
 		logger:          noopLogger{},
+		subs:            make(map[chan struct{}]struct{}),
 	}
 	for _, o := range opts {
 		o(c)
@@ -93,6 +96,7 @@ func (c *Controller) NewOrder(t order.Type) *order.Order {
 	c.queue.Enqueue(o)
 	c.logger.Printf("Order #%d (%s) created → PENDING", id, t)
 	c.signal()
+	c.notify()
 	return o
 }
 
@@ -110,6 +114,7 @@ func (c *Controller) AddBot() *bot {
 	c.logger.Printf("Bot #%d added", id)
 	go b.run()
 	c.signal() // wake bot in case orders are already waiting
+	c.notify()
 	return b
 }
 
@@ -128,6 +133,7 @@ func (c *Controller) RemoveBot() bool {
 
 	close(b.stopCh)
 	c.logger.Printf("Bot #%d removed", b.id)
+	c.notify()
 	return true
 }
 
@@ -175,18 +181,49 @@ func (c *Controller) signal() {
 	}
 }
 
+// Subscribe returns a channel that receives a signal whenever system state changes.
+// The caller must call Unsubscribe when done to free resources.
+func (c *Controller) Subscribe() chan struct{} {
+	ch := make(chan struct{}, 1)
+	c.subMu.Lock()
+	c.subs[ch] = struct{}{}
+	c.subMu.Unlock()
+	return ch
+}
+
+// Unsubscribe removes and closes a channel previously returned by Subscribe.
+func (c *Controller) Unsubscribe(ch chan struct{}) {
+	c.subMu.Lock()
+	delete(c.subs, ch)
+	c.subMu.Unlock()
+	close(ch)
+}
+
+func (c *Controller) notify() {
+	c.subMu.Lock()
+	for ch := range c.subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+	c.subMu.Unlock()
+}
+
 func (c *Controller) completeOrder(b *bot, o *order.Order) {
 	o.Status = order.Complete
 	c.mu.Lock()
 	c.completed = append(c.completed, o)
 	c.mu.Unlock()
 	c.logger.Printf("Order #%d (%s) completed by Bot #%d → COMPLETE", o.ID, o.Type, b.id)
+	c.notify()
 }
 
 func (c *Controller) returnOrder(o *order.Order) {
 	o.Status = order.Pending
 	c.queue.EnqueueFront(o)
 	c.logger.Printf("Order #%d (%s) returned to PENDING (bot interrupted)", o.ID, o.Type)
+	c.notify()
 }
 
 func (b *bot) run() {
@@ -204,6 +241,7 @@ func (b *bot) run() {
 		b.mu.Lock()
 		b.currentOrder = o
 		b.mu.Unlock()
+		b.ctrl.notify()
 
 		b.ctrl.logger.Printf("Bot #%d picking up Order #%d (%s)", b.id, o.ID, o.Type)
 

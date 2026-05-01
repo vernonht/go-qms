@@ -42,7 +42,7 @@ func runServer(addr string) {
 	fmt.Printf("  POST   /orders   {\"type\":\"normal\"|\"vip\"}\n")
 	fmt.Printf("  POST   /bots\n")
 	fmt.Printf("  DELETE /bots\n")
-	fmt.Printf("  GET    /state\n")
+	fmt.Printf("  GET    /state         (HTTP JSON snapshot or WebSocket stream)\n")
 	if err := http.ListenAndServe(addr, api.New(c)); err != nil {
 		fmt.Fprintf(os.Stderr, "server error: %v\n", err)
 		os.Exit(1)

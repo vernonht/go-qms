@@ -5,9 +5,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"qms/internal/controller"
 	"qms/internal/order"
 )
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
 
 type Server struct {
 	ctrl *controller.Controller
@@ -68,20 +73,18 @@ func (s *Server) removeBot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"bot_count": s.ctrl.BotCount()})
 }
 
-// GET /state
-func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
+type botResp struct {
+	ID           int        `json:"id"`
+	CurrentOrder *orderResp `json:"current_order,omitempty"`
+}
+type stateResp struct {
+	Pending   []orderResp `json:"pending"`
+	Completed []orderResp `json:"completed"`
+	Bots      []botResp   `json:"bots"`
+}
+
+func (s *Server) buildState() stateResp {
 	st := s.ctrl.State()
-
-	type botResp struct {
-		ID           int        `json:"id"`
-		CurrentOrder *orderResp `json:"current_order,omitempty"`
-	}
-	type stateResp struct {
-		Pending   []orderResp `json:"pending"`
-		Completed []orderResp `json:"completed"`
-		Bots      []botResp   `json:"bots"`
-	}
-
 	resp := stateResp{
 		Pending:   make([]orderResp, len(st.Pending)),
 		Completed: make([]orderResp, len(st.Completed)),
@@ -101,7 +104,49 @@ func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Bots[i] = br
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp
+}
+
+// GET /state – plain HTTP returns a JSON snapshot; WebSocket clients receive a
+// push on every state change.
+func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
+	// If WebSocket upgrade requested, switch to streaming updates instead of one-time snapshot.
+	if websocket.IsWebSocketUpgrade(r) {
+		s.streamState(w, r)
+		return
+	}
+	// Otherwise, return a single snapshot.
+	writeJSON(w, http.StatusOK, s.buildState())
+}
+
+func (s *Server) streamState(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	ch := s.ctrl.Subscribe()
+	defer s.ctrl.Unsubscribe(ch)
+
+	// Send initial snapshot immediately.
+	if err := conn.WriteJSON(s.buildState()); err != nil {
+		return
+	}
+
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := conn.WriteJSON(s.buildState()); err != nil {
+				return
+			}
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 type orderResp struct {
