@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	httpSwagger "github.com/swaggo/http-swagger"
 	"qms/internal/controller"
 	"qms/internal/order"
 )
@@ -32,11 +33,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// POST /orders  body: {"type":"normal"|"vip"}
+type createOrderRequest struct {
+	Type string `json:"type" example:"normal" enums:"normal,vip"`
+}
+
+// createOrder creates a new order.
+// @Summary Create order
+// @Description Creates a new order. VIP orders are prioritized ahead of normal orders.
+// @Tags orders
+// @Accept json
+// @Produce json
+// @Param request body createOrderRequest true "Order payload"
+// @Success 201 {object} orderResp
+// @Failure 400 {string} string
+// @Failure 429 {string} string
+// @Router /orders [post]
 func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Type string `json:"type"`
-	}
+	var req createOrderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
@@ -57,13 +70,26 @@ func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, orderJSON(o))
 }
 
-// POST /bots
+// addBot creates a new bot.
+// @Summary Add bot
+// @Description Adds a bot that can process pending orders.
+// @Tags bots
+// @Produce json
+// @Success 201 {object} map[string]int
+// @Router /bots [post]
 func (s *Server) addBot(w http.ResponseWriter, r *http.Request) {
 	s.ctrl.AddBot()
 	writeJSON(w, http.StatusCreated, map[string]int{"bot_count": s.ctrl.BotCount()})
 }
 
-// DELETE /bots
+// removeBot removes the newest bot.
+// @Summary Remove bot
+// @Description Removes the newest bot. Returns 404 if no bots exist.
+// @Tags bots
+// @Produce json
+// @Success 200 {object} map[string]int
+// @Failure 404 {string} string
+// @Router /bots [delete]
 func (s *Server) removeBot(w http.ResponseWriter, r *http.Request) {
 	// TODO add function to remove specific bot by ID
 	if !s.ctrl.RemoveBot() {
@@ -107,8 +133,13 @@ func (s *Server) buildState() stateResp {
 	return resp
 }
 
-// GET /state – plain HTTP returns a JSON snapshot; WebSocket clients receive a
-// push on every state change.
+// getState returns current queue state.
+// @Summary Get state
+// @Description Returns a JSON snapshot of queue state. WebSocket upgrades on this path stream updates.
+// @Tags state
+// @Produce json
+// @Success 200 {object} stateResp
+// @Router /state [get]
 func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
 	// If WebSocket upgrade requested, switch to streaming updates instead of one-time snapshot.
 	if websocket.IsWebSocketUpgrade(r) {

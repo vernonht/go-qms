@@ -10,11 +10,16 @@ import (
 	"strings"
 	"time"
 
+	_ "qms/docs"
 	"qms/internal/api"
 	"qms/internal/controller"
 	"qms/internal/order"
 )
 
+// @title Queue Management System API
+// @version 1.0
+// @description HTTP API for creating orders, managing bots, and viewing queue state.
+// @BasePath /
 func main() {
 	args := os.Args[1:]
 	if len(args) > 0 && args[0] == "--demo" {

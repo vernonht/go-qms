@@ -1,0 +1,129 @@
+basePath: /
+definitions:
+  api.botResp:
+    properties:
+      current_order:
+        $ref: '#/definitions/api.orderResp'
+      id:
+        type: integer
+    type: object
+  api.createOrderRequest:
+    properties:
+      type:
+        enum:
+        - normal
+        - vip
+        example: normal
+        type: string
+    type: object
+  api.orderResp:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      status:
+        type: string
+      type:
+        type: string
+    type: object
+  api.stateResp:
+    properties:
+      bots:
+        items:
+          $ref: '#/definitions/api.botResp'
+        type: array
+      completed:
+        items:
+          $ref: '#/definitions/api.orderResp'
+        type: array
+      pending:
+        items:
+          $ref: '#/definitions/api.orderResp'
+        type: array
+    type: object
+info:
+  contact: {}
+  description: HTTP API for creating orders, managing bots, and viewing queue state.
+  title: Queue Management System API
+  version: "1.0"
+paths:
+  /bots:
+    delete:
+      description: Removes the newest bot. Returns 404 if no bots exist.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: integer
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            type: string
+      summary: Remove bot
+      tags:
+      - bots
+    post:
+      description: Adds a bot that can process pending orders.
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties:
+              type: integer
+            type: object
+      summary: Add bot
+      tags:
+      - bots
+  /orders:
+    post:
+      consumes:
+      - application/json
+      description: Creates a new order. VIP orders are prioritized ahead of normal
+        orders.
+      parameters:
+      - description: Order payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.createOrderRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.orderResp'
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+        "429":
+          description: Too Many Requests
+          schema:
+            type: string
+      summary: Create order
+      tags:
+      - orders
+  /state:
+    get:
+      description: Returns a JSON snapshot of queue state. WebSocket upgrades on this
+        path stream updates.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.stateResp'
+      summary: Get state
+      tags:
+      - state
+swagger: "2.0"

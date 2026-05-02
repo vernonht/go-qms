@@ -53,6 +53,16 @@ Start the server:
 ./qms --server :8080
 ```
 
+Swagger docs:
+```
+http://localhost:8080/swagger/index.html
+```
+
+If API annotations change, regenerate docs with:
+```
+$(go env GOPATH)/bin/swag init -g main.go
+```
+
 | Method | Path | Body | Response |
 |---|---|---|---|
 | `POST` | `/orders` | `{"type":"normal"\|"vip"}` | Created order object |
