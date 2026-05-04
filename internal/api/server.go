@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/httprate"
 	"github.com/gorilla/websocket"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"qms/internal/controller"
@@ -16,21 +18,29 @@ var upgrader = websocket.Upgrader{
 }
 
 type Server struct {
-	ctrl *controller.Controller
-	mux  *http.ServeMux
+	ctrl   *controller.Controller
+	router chi.Router
 }
 
 func New(c *controller.Controller) *Server {
-	s := &Server{ctrl: c, mux: http.NewServeMux()}
-	s.mux.HandleFunc("POST /orders", s.createOrder)
-	s.mux.HandleFunc("POST /bots", s.addBot)
-	s.mux.HandleFunc("DELETE /bots", s.removeBot)
-	s.mux.HandleFunc("GET /state", s.getState)
+	return newServer(c, httprate.LimitByIP(3, time.Minute))
+}
+
+func newServer(c *controller.Controller, orderThrottle func(http.Handler) http.Handler) *Server {
+	s := &Server{
+		ctrl:   c,
+		router: chi.NewRouter(),
+	}
+	s.router.With(orderThrottle).Post("/orders", s.createOrder)
+	s.router.Post("/bots", s.addBot)
+	s.router.Delete("/bots", s.removeBot)
+	s.router.Get("/state", s.getState)
+	s.router.Get("/swagger/*", httpSwagger.WrapHandler)
 	return s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	s.router.ServeHTTP(w, r)
 }
 
 type createOrderRequest struct {

@@ -2,7 +2,7 @@
 
 ## Architecture
 
-External dependencies: `github.com/gorilla/websocket`
+External dependencies: `github.com/go-chi/chi/v5`, `github.com/gorilla/websocket`
 
 ## Architecture
 
@@ -65,10 +65,12 @@ $(go env GOPATH)/bin/swag init -g main.go
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| `POST` | `/orders` | `{"type":"normal"\|"vip"}` | Created order object |
+| `POST` | `/orders` | `{"type":"normal"\|"vip"}` | Created order object (throttled: 100 requests/minute per IP) |
 | `POST` | `/bots` | — | `{"bot_count": N}` |
 | `DELETE` | `/bots` | — | `{"bot_count": N}` |
 | `GET` | `/state` | — | JSON snapshot (HTTP) **or** live push stream (WebSocket) |
+
+If `/orders` exceeds the limit, the API returns `429 Too Many Requests`.
 
 #### WebSocket stream
 
